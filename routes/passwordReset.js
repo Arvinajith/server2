@@ -11,7 +11,7 @@ const emailService = require('../services/emailService');
 
 /**
  * POST /api/password-reset/forgot-password
- * Request password reset - sends email with reset link
+ * Request password reset - sends email with OTP
  */
 router.post('/forgot-password', async (req, res) => {
     try {
@@ -32,38 +32,35 @@ router.post('/forgot-password', async (req, res) => {
             // For security, don't reveal if user exists or not
             return res.status(404).json({ 
                 success: false, 
-                message: 'If an account with that email exists, a password reset link has been sent.' 
+                message: 'If an account with that email exists, a password reset OTP has been sent.' 
             });
         }
 
-        // Generate random reset token
-        const resetToken = crypto.randomBytes(32).toString('hex');
+        // Generate 6-digit OTP
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
         
-        // Set token expiry (1 hour from now)
-        const resetTokenExpiry = new Date();
-        resetTokenExpiry.setHours(resetTokenExpiry.getHours() + 1);
+        // Set OTP expiry (10 minutes from now)
+        const otpExpiry = new Date();
+        otpExpiry.setMinutes(otpExpiry.getMinutes() + 10);
 
-        // Save token to database
-        user.resetToken = resetToken;
-        user.resetTokenExpiry = resetTokenExpiry;
+        // Save OTP to database
+        user.resetOTP = otp;
+        user.resetOTPExpiry = otpExpiry;
         await user.save();
 
-        // Create reset URL
-        const resetUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/reset-password/${resetToken}`;
-
-        // Send email with reset link
+        // Send email with OTP
         try {
-            await emailService.sendPasswordResetEmail(user.email, resetUrl);
+            await emailService.sendPasswordResetOTP(user.email, otp);
             
             res.status(200).json({ 
                 success: true, 
-                message: 'Password reset link has been sent to your email address.' 
+                message: 'Password reset OTP has been sent to your email address.' 
             });
         } catch (emailError) {
             console.error('Email sending error:', emailError);
-            // Clear token if email fails
-            user.resetToken = null;
-            user.resetTokenExpiry = null;
+            // Clear OTP if email fails
+            user.resetOTP = null;
+            user.resetOTPExpiry = null;
             await user.save();
             
             res.status(500).json({ 
@@ -82,50 +79,67 @@ router.post('/forgot-password', async (req, res) => {
 });
 
 /**
- * GET /api/password-reset/verify-token/:token
- * Verify if reset token is valid
+ * POST /api/password-reset/verify-otp
+ * Verify OTP for password reset
  */
-router.get('/verify-token/:token', async (req, res) => {
+router.post('/verify-otp', async (req, res) => {
     try {
-        const { token } = req.params;
+        const { email, otp } = req.body;
 
-        if (!token) {
+        // Validate input
+        if (!email || !otp) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Reset token is required' 
+                message: 'Email and OTP are required' 
             });
         }
 
-        // Find user with matching token
-        const user = await User.findOne({ resetToken: token });
+        // Find user
+        const user = await User.findOne({ email: email.toLowerCase().trim() });
 
         if (!user) {
             return res.status(404).json({ 
                 success: false, 
-                message: 'Invalid or expired reset token.' 
+                message: 'Invalid email address.' 
             });
         }
 
-        // Check if token has expired
-        if (user.resetTokenExpiry < new Date()) {
-            // Clear expired token
-            user.resetToken = null;
-            user.resetTokenExpiry = null;
+        // Check if OTP exists
+        if (!user.resetOTP) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'No OTP found. Please request a new password reset.' 
+            });
+        }
+
+        // Check if OTP matches
+        if (user.resetOTP !== otp) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Invalid OTP. Please check and try again.' 
+            });
+        }
+
+        // Check if OTP has expired
+        if (user.resetOTPExpiry < new Date()) {
+            // Clear expired OTP
+            user.resetOTP = null;
+            user.resetOTPExpiry = null;
             await user.save();
             
             return res.status(400).json({ 
                 success: false, 
-                message: 'Reset token has expired. Please request a new password reset.' 
+                message: 'OTP has expired. Please request a new password reset.' 
             });
         }
 
         res.status(200).json({ 
             success: true, 
-            message: 'Token is valid' 
+            message: 'OTP verified successfully' 
         });
 
     } catch (error) {
-        console.error('Verify token error:', error);
+        console.error('Verify OTP error:', error);
         res.status(500).json({ 
             success: false, 
             message: 'An error occurred. Please try again later.' 
@@ -135,17 +149,17 @@ router.get('/verify-token/:token', async (req, res) => {
 
 /**
  * POST /api/password-reset/reset-password
- * Reset password with token
+ * Reset password with OTP verification
  */
 router.post('/reset-password', async (req, res) => {
     try {
-        const { token, newPassword } = req.body;
+        const { email, otp, newPassword } = req.body;
 
         // Validate input
-        if (!token || !newPassword) {
+        if (!email || !otp || !newPassword) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Token and new password are required' 
+                message: 'Email, OTP, and new password are required' 
             });
         }
 
@@ -156,35 +170,51 @@ router.post('/reset-password', async (req, res) => {
             });
         }
 
-        // Find user with matching token
-        const user = await User.findOne({ resetToken: token });
+        // Find user
+        const user = await User.findOne({ email: email.toLowerCase().trim() });
 
         if (!user) {
             return res.status(404).json({ 
                 success: false, 
-                message: 'Invalid or expired reset token.' 
+                message: 'Invalid email address.' 
             });
         }
 
-        // Check if token has expired
-        if (user.resetTokenExpiry < new Date()) {
-            // Clear expired token
-            user.resetToken = null;
-            user.resetTokenExpiry = null;
+        // Check if OTP exists
+        if (!user.resetOTP) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'No OTP found. Please request a new password reset.' 
+            });
+        }
+
+        // Check if OTP matches
+        if (user.resetOTP !== otp) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Invalid OTP. Please check and try again.' 
+            });
+        }
+
+        // Check if OTP has expired
+        if (user.resetOTPExpiry < new Date()) {
+            // Clear expired OTP
+            user.resetOTP = null;
+            user.resetOTPExpiry = null;
             await user.save();
             
             return res.status(400).json({ 
                 success: false, 
-                message: 'Reset token has expired. Please request a new password reset.' 
+                message: 'OTP has expired. Please request a new password reset.' 
             });
         }
 
         // Update password (will be hashed by pre-save hook)
         user.password = newPassword;
         
-        // Clear reset token and expiry
-        user.resetToken = null;
-        user.resetTokenExpiry = null;
+        // Clear OTP and expiry
+        user.resetOTP = null;
+        user.resetOTPExpiry = null;
         
         await user.save();
 

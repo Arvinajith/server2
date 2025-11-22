@@ -19,11 +19,11 @@ const userSchema = new mongoose.Schema({
         required: true,
         minlength: 6
     },
-    resetToken: {
+    resetOTP: {
         type: String,
         default: null
     },
-    resetTokenExpiry: {
+    resetOTPExpiry: {
         type: Date,
         default: null
     },
