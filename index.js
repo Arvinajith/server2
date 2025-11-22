@@ -17,11 +17,24 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
+const allowedOrigins = [
+    'http://localhost:3000', 
+    'https://curious-selkie-1bccc6.netlify.app'
+];
+
 app.use(cors({
-  origin: 'http://localhost:3000',
-  origin:  ' https://curious-selkie-1bccc6.netlify.app/',// allow your frontend
-  credentials: true,
+    origin: function(origin, callback){
+        // allow requests with no origin (like Postman)
+        if(!origin) return callback(null, true);
+        if(allowedOrigins.indexOf(origin) === -1){
+            const msg = 'The CORS policy for this site does not allow access from the specified origin.';
+            return callback(new Error(msg), false);
+        }
+        return callback(null, true);
+    },
+    credentials: true
 }));
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -46,4 +59,3 @@ app.get('/api/health', (req, res) => {
 app.listen(PORT, () => {
     console.log(`🚀 Server is running on port ${PORT}`);
 });
-
