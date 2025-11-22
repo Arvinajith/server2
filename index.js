@@ -17,12 +17,16 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: 'http://localhost:3000',
+  origin:  ' https://curious-selkie-1bccc6.netlify.app/',// allow your frontend
+  credentials: true,
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Database connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/passwordreset', {
+mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://ajithkumar:ajithkumar@cluster0.tyhgl76.mongodb.net/passwordreset', {
     useNewUrlParser: true,
     useUnifiedTopology: true,
 })
